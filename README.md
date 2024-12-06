@@ -10,9 +10,9 @@ Here are the options that were used to build the libraries on:
 Windows:
 ```bash
 ...\5.6.0\configure.bat "-nomake" "tests" "-qtnamespace" "QT"
-"-confirm-license" "-accessibility" "-opensource" "-force-debug-info" "-platform" "win32-msvc2015" "-opengl" "desktop" "-prefix" "C:/Qt/5.6.0-x64
+"-confirm-license" "-accessibility" "-opensource" "-force-debug-info" "-platform" "win32-msvc2015" "-opengl" "desktop" "-prefix" "C:/Qt/5.6.0-x64"
 ```
-"
+
 Note that you will have to build with Visual Studio 2015, to obtain compatible libs
 Linux:
 ```bash
