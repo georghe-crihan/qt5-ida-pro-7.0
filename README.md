@@ -2,6 +2,22 @@
 
 [Original QT README](README).
 
+# Further fixes to build under OSX High Sierra
+OSX High Sierra and XCode 9.4 are required to build QT 5.6.0 under OSX.
+
+Below are modifications to Makefile(s) to be applied after completing configure:
+
+```make 
+# ./qtbase/examples/widgets/itemviews/editabletreemodel/Makefile
+# ./qtbase/examples/widgets/graphicsview/diagramscene/Makefile
+
+all: Makefile
+install: all
+clean: all
+```
+
+# HexRays note
+
 A handful of our users have already requested information regarding the Qt 5.6.0 build, that is shipped with IDA 7.0.
 
 ## Configure options
