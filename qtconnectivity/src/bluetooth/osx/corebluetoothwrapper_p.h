@@ -45,11 +45,10 @@
 // We mean it.
 //
 
-#ifndef QT_OSX_BLUETOOTH
 
 #import <CoreBluetooth/CoreBluetooth.h>
 
-#else
+#ifdef QT_OSX_BLUETOOTH
 
 #include <QtCore/qglobal.h>
 
