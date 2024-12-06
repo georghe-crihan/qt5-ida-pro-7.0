@@ -84,6 +84,14 @@
 
 QT_BEGIN_NAMESPACE
 
+__attribute__((visibility("default"))) void atexit_destroy_qxcbintegration(void)
+{
+  QXcbIntegration *inst = QXcbIntegration::instance();
+  if ( inst != NULL )
+    inst->atexit_destroy();
+}
+
+
 // Find out if our parent process is gdb by looking at the 'exe' symlink under /proc,.
 // or, for older Linuxes, read out 'cmdline'.
 static bool runningUnderDebugger()
@@ -183,6 +191,10 @@ QXcbIntegration::QXcbIntegration(const QStringList &parameters, int &argc, char 
     }
 
     m_fontDatabase.reset(new QGenericUnixFontDatabase());
+
+    QByteArray noatexit = qgetenv("QXCBINTEGRATION_NO_ATEXIT");
+    if ( noatexit.isNull() )
+      atexit(atexit_destroy_qxcbintegration);
 }
 
 QXcbIntegration::~QXcbIntegration()
@@ -452,6 +464,14 @@ void QXcbIntegration::sync()
     for (int i = 0; i < m_connections.size(); i++) {
         m_connections.at(i)->sync();
     }
+}
+
+void QXcbIntegration::atexit_destroy()
+{
+    for (int i = 0; i < m_connections.size(); i++) {
+        m_connections.at(i)->clipboard()->atexit_encountered();
+    }
+    qDeleteAll(m_connections);
 }
 
 QT_END_NAMESPACE

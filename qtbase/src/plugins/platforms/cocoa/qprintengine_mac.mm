@@ -45,6 +45,11 @@ QT_BEGIN_NAMESPACE
 
 extern QMarginsF qt_convertMargins(const QMarginsF &margins, QPageLayout::Unit fromUnits, QPageLayout::Unit toUnits);
 
+// TODO: QTBUG-38566 Use qt_idForWindowsId() as OS X 10.6 thinks call to
+// QPageSize::id() is a reserved ObjC keyword, once 10.6 support is dropped
+// this can be removed
+extern QPageSize::PageSizeId qt_idForWindowsID(int windowsId, QSize *match = 0);
+
 QMacPrintEngine::QMacPrintEngine(QPrinter::PrinterMode mode) : QPaintEngine(*(new QMacPrintEnginePrivate))
 {
     Q_D(QMacPrintEngine);
@@ -552,15 +557,18 @@ void QMacPrintEngine::setProperty(PrintEnginePropertyKey key, const QVariant &va
         d->setPageSize(d->m_printDevice->supportedPageSize(value.toString()));
         break;
     case PPK_WindowsPageSize:
-        d->setPageSize(QPageSize(QPageSize::id(value.toInt())));
+        // TODO: QTBUG-38566 Use qt_idForWindowsId() as OS X 10.6 thinks call
+        // to QPageSize::id() is a reserved ObjC keyword, once support for 10.6
+        // is dropped this can be reverted
+        d->setPageSize(QPageSize(qt_idForWindowsID(value.toInt())));
         break;
     case PPK_PrinterName: {
-        QString id = value.toString();
-        if (id.isEmpty())
-            id = QCocoaPrinterSupport().defaultPrintDeviceId();
-        else if (!QCocoaPrinterSupport().availablePrintDeviceIds().contains(id))
-            break;
-        d->m_printDevice.reset(new QCocoaPrintDevice(id));
+        QString pid = value.toString();
+	if (pid.isEmpty())
+	    pid = QCocoaPrinterSupport().defaultPrintDeviceId();
+	else if (!QCocoaPrinterSupport().availablePrintDeviceIds().contains(pid))
+	    break;
+        d->m_printDevice.reset(new QCocoaPrintDevice(pid));
         PMPrinter printer = d->m_printDevice->macPrinter();
         PMRetain(printer);
         PMSessionSetCurrentPMPrinter(d->session(), printer);

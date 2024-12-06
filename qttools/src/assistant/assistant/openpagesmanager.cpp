@@ -173,13 +173,14 @@ HelpViewer *OpenPagesManager::createPage()
 void OpenPagesManager::closeCurrentPage()
 {
     TRACE_OBJ
-    Q_ASSERT(m_model->rowCount() > 1);
-    const QModelIndexList selectedIndexes
-        = m_openPagesWidget->selectionModel()->selectedRows();
-    if (selectedIndexes.isEmpty())
-        return;
-    Q_ASSERT(selectedIndexes.count() == 1);
-    removePage(selectedIndexes.first().row());
+    if (m_model->rowCount() > 1) {
+        const QModelIndexList selectedIndexes
+	  = m_openPagesWidget->selectionModel()->selectedRows();
+	if (selectedIndexes.isEmpty())
+	  return;
+	if (selectedIndexes.count() == 1)
+	  removePage(selectedIndexes.first().row());
+    }
 }
 
 HelpViewer *OpenPagesManager::createPage(const QUrl &url, bool fromSearch)

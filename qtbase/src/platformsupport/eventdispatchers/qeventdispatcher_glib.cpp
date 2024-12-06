@@ -111,8 +111,11 @@ QPAEventDispatcherGlib::~QPAEventDispatcherGlib()
 
 bool QPAEventDispatcherGlib::processEvents(QEventLoop::ProcessEventsFlags flags)
 {
+    QEventLoop::ProcessEventsFlags savedFlags = m_flags;
     m_flags = flags;
-    return QEventDispatcherGlib::processEvents(m_flags);
+    bool result = QEventDispatcherGlib::processEvents(m_flags);
+    m_flags = savedFlags;
+    return result;
 }
 
 QT_END_NAMESPACE

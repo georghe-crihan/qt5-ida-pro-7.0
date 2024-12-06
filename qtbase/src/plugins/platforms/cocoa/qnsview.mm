@@ -1451,14 +1451,12 @@ static QTabletEvent::TabletDevice wacomTabletDevice(NSEvent *theEvent)
     quint32 nativeVirtualKey = [nsevent keyCode];
 
     QChar ch = QChar::ReplacementCharacter;
-    int keyCode = Qt::Key_unknown;
-    if ([characters length] != 0) {
-        if (((modifiers & Qt::MetaModifier) || (modifiers & Qt::AltModifier)) && ([charactersIgnoringModifiers length] != 0))
-            ch = QChar([charactersIgnoringModifiers characterAtIndex:0]);
-        else
-            ch = QChar([characters characterAtIndex:0]);
-        keyCode = [self convertKeyCode:ch];
-    }
+    if ([characters length] != 0)
+        ch = QChar([characters characterAtIndex:0]);
+    else if ([charactersIgnoringModifiers length] != 0 && ((modifiers & Qt::MetaModifier) || (modifiers & Qt::AltModifier)))
+        ch = QChar([charactersIgnoringModifiers characterAtIndex:0]);
+
+    int keyCode = [self convertKeyCode:ch];
 
     // we will send a key event unless the input method sets m_sendKeyEvent to false
     m_sendKeyEvent = true;

@@ -41,8 +41,12 @@ QT_BEGIN_NAMESPACE
 /**************************************************************************
     Socket Notifiers
  *************************************************************************/
-void qt_mac_socket_callback(CFSocketRef s, CFSocketCallBackType callbackType, CFDataRef,
-                            const void *, void *info)
+void QT_PREPEND_NAMESPACE(qt_mac_socket_callback)(
+        CFSocketRef s,
+	CFSocketCallBackType callbackType,
+	CFDataRef,
+	const void *,
+	void *info)
 {
 
     QCFSocketNotifier *cfSocketNotifier = static_cast<QCFSocketNotifier *>(info);

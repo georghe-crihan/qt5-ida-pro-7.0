@@ -1,0 +1,1075 @@
+diff --git a/build/build.py b/build/build.py
+new file mode 100644
+index 0000000..690a0dd
+--- /dev/null
++++ b/build/build.py
+@@ -0,0 +1,108 @@
++
++import sys
++import subprocess
++import os
++
++from argparse import ArgumentParser
++parser = ArgumentParser()
++parser.add_argument("--build-x64", dest="build_x64", default=False, action="store_true", help="Build x64 libs or x86 libs?")
++parser.add_argument("--vs2010", dest="vs_2010", default=False, action="store_true", help="Build with VisualStudio 2010. Windows only, duh.")
++parser.add_argument("--dry-run", dest="dry_run", default=False, action="store_true", help="Don't issue configure command; just print it.")
++clopts = parser.parse_args()
++
++qtver = "5.6.0"
++
++configure_script, build_command, install_dir = {
++    "win32" : (
++        "configure.bat",
++        ["jom", "-j"],
++        "C:/Qt/"
++    ),
++    "linux2" : (
++        "configure",
++        ["make", "-j"],
++        "/usr/local/Qt/"
++    ),
++    "darwin" : (
++        "configure",
++        ["make", "-j"],
++        "/Users/Shared/Qt/"
++    ),
++    }[sys.platform]
++options = {
++    "common" : [
++        "-nomake", "tests",
++        "-qtnamespace", "QT",
++        "-confirm-license",
++        "-accessibility",
++        "-opensource",
++        "-force-debug-info",
++        ],
++    "win32" : [
++        "-platform", ("win32-msvc2010" if clopts.vs_2010 else "win32-msvc2015"),
++        "-opengl", "desktop",
++        ],
++    "linux2" : [
++        "-platform", ("linux-g++-64" if clopts.build_x64 else "linux-g++-32"),
++        "-developer-build",
++        "-fontconfig",
++        "-qt-freetype",
++        "-qt-libpng",
++        "-glib",
++        "-qt-xcb",
++        "-dbus",
++        "-qt-sql-sqlite",
++        "-gtkstyle",
++        ],
++    "darwin" : [
++        "-platform", ("macx-g++" if clopts.build_x64 else "macx-g++-32"),
++        "-debug-and-release",
++        "-fontconfig",
++        "-qt-freetype",
++        "-qt-libpng",
++        "-qt-sql-sqlite",
++        ]
++    }
++
++if sys.platform == "win32" and clopts.build_x64:
++    print "WARNING WARNING WARNING WARNING WARNING WARNING WARNING WARNING"
++    print "Hopefully you are running this in a Visual Studio x64 prompt!"
++    print "WARNING WARNING WARNING WARNING WARNING WARNING WARNING WARNING"
++
++parent_dir = os.path.join(os.getcwd(), "..")
++argv = [os.path.join(parent_dir, configure_script)]
++argv.extend(options["common"])
++argv.extend(options[sys.platform])
++argv.extend(["-prefix", (install_dir + "%s%s%s") % (qtver, "-vs2010" if clopts.vs_2010 else "", "-x64" if clopts.build_x64 else "")])
++
++def run(argv):
++    if clopts.dry_run:
++        uf_argv = [argv[0]] # user-friendly argv
++        for arg in argv[1:]:
++            uf_argv.append("\"%s\"" % arg)
++        print " ".join(uf_argv)
++    else:
++        subprocess.check_call(argv)
++
++def phase(which):
++    print "*" * 75
++    print "{:^75}".format(which)
++    print "*" * 75
++
++phase("Configuring")
++run(argv)
++
++phase("Building")
++argv = build_command[:]
++run(argv)
++
++phase("Installing")
++argv = []
++if sys.platform != "win32":
++    argv.append("sudo")
++argv.extend(build_command[:])
++argv.append("install")
++run(argv)
++
++if sys.platform == "linux2":
++    need_to_patch_runpaths()
+diff --git a/package.py b/package.py
+new file mode 100644
+index 0000000..690a0dd
+--- /dev/null
++++ b/package.py
+@@ -0,0 +1,113 @@
++#!/usr/bin/python
++
++import sys
++import subprocess
++import os
++import shutil
++import datetime
++import platform
++import socket
++import re
++
++# Determine default path to common storage
++if "linux" in sys.platform:
++    def_common = "/media/syn-common"
++    line = subprocess.check_output(["g++", "--version"]).split("\n")[0]
++    idx = line.rindex(" ")
++    compiler = "g++-%s" % line[idx+1:]
++elif "win32" in sys.platform:
++    def_common = "S:\\"
++    line = subprocess.check_output(["cl.exe"], stderr=subprocess.STDOUT).split("\n")[0]
++    m = re.match(".*Version\s([0-9.]*).*", line)
++    clver = m.group(1)
++    compiler = {
++        "19.00.23918" : "msvc2015",
++        "19.00.23506" : "msvc2015",
++        "19.00.23026" : "msvc2015",
++        "19.00.22816" : "msvc2015-rc",
++        "16.00.40219.01" : "msvc2010",
++        }[clver]
++elif "darwin" in sys.platform:
++    def_common = "/Volumes/common"
++    line = subprocess.check_output(["g++", "--version"]).split("\n")[0]
++    idx = line.index(" ")
++    compiler = line[0:idx]
++elif "cygwin" in sys.platform:
++    raise Exception("This POS must be run from a lame 'cmd' thing")
++
++from argparse import ArgumentParser
++parser = ArgumentParser()
++parser.add_argument("-V", "--version", dest="version", help="Directory/version to package")
++parser.add_argument("-C", "--common", dest="common", default=def_common, help="Path to mounted \\\\syn\\common")
++parser.add_argument("-R", "--dry-run", dest="dry_run", default=False, action="store_true", help="Don't actually perform the packaging")
++parser.add_argument("-S", "--source", dest="package_source", default=False, action="store_true", help="Package source, not a built distro")
++options = parser.parse_args()
++
++now = datetime.datetime.now()
++now = now.replace(microsecond=0)
++date_str = now.isoformat().replace(":", "_")
++
++fname = None
++
++version = options.version
++while version.endswith("/") or version.endswith("\\"):
++    version = version[:-1]
++
++def path_on_common(fname):
++    return os.path.join(options.common, "Qt", version.replace("-x64", "").replace("-vs2010", ""), fname)
++
++def run(argv, cwd=None):
++    print "Executing: \"%s\"" % " ".join(argv)
++    if not options.dry_run:
++        subprocess.check_call(argv, cwd=cwd)
++
++
++if options.package_source:
++    fname = "qt-src-%s-%s.tar" % (version, date_str)
++    dest_path = path_on_common(fname)
++    run(["git", "archive", "-o", dest_path, "master"])
++    run(["bzip2", dest_path])
++else:
++    def get_unix_host():
++        host = subprocess.check_output(["uname", "-n"]).rstrip()
++        host = host.replace(".hex-rays.com", "")
++        return host
++
++    if "linux" in sys.platform:
++        def get_after_colon(argv):
++            line = subprocess.check_output(argv)
++            parts = map(lambda l : l.strip(), line.rstrip().split(":"))
++            return parts[1]
++        dist_id = get_after_colon(["lsb_release", "-i"])
++        release = get_after_colon(["lsb_release", "-r"])
++        host = get_unix_host()
++        fname = "qt-%s-%s-%s-%s-%s-%s.tar.bz2" % (version, date_str, dist_id, release, host, compiler)
++    elif "darwin" in sys.platform:
++        # dsymutil-ize all the things
++        lib_reldir = os.path.join(version, "lib")
++        dirs = filter(lambda d: d.endswith(".framework"), os.listdir(lib_reldir))
++        cwd = os.getcwd()
++        for d in dirs:
++            fwk = d.replace(".framework", "")
++            # it seems Qt 5.5.0 introduced a 'QtUiPlugin' framework that only contains header files.
++            # so, don't bother running dsymutil on it
++            if fwk == "QtUiPlugin":
++                continue
++            run(["dsymutil", fwk + "_debug"], cwd=os.path.join(cwd, lib_reldir, d, "Versions", "Current"))
++        run(["dsymutil", "libqcocoa_debug.dylib"], cwd=os.path.join(version, "plugins", "platforms"))
++        # package
++        release = subprocess.check_output(["sw_vers", "-productVersion"]).rstrip()
++        host = get_unix_host()
++        fname = "qt-%s-%s-%s-%s-%s-%s.tar.bz2" % (version, date_str, "osx", release, host, compiler)
++    elif "win32" in sys.platform:
++        release = platform.platform()
++        host = socket.gethostname()
++        fname = "qt-%s-%s-%s-%s-%s.zip" % (version, date_str, release, host, compiler)
++
++    dest_path = path_on_common(fname)
++    if fname.endswith(".tar") or fname.endswith(".tar.bz2"):
++        argv = ["tar", "cjf", dest_path, version]
++    else:
++        argv = ["zip", "-r", dest_path, version]
++
++    run(argv)
+diff --git a/qtbase/configure.bat b/qtbase/configure.bat
+index 47acf26..4f9a327 100644
+--- a/qtbase/configure.bat
++++ b/qtbase/configure.bat
+@@ -35,7 +35,7 @@
+ set QTSRC=%~dp0
+ set QTDIR=%CD%
+ 
+-if not exist %QTSRC%.gitignore goto sconf
++REM if not exist %QTSRC%.gitignore goto sconf
+ echo Please wait while bootstrapping configure ...
+ 
+ for %%C in (cl.exe icl.exe g++.exe perl.exe jom.exe) do set %%C=%%~$PATH:C
+diff --git a/qtbase/examples/opengl/opengl.pro b/qtbase/examples/opengl/opengl.pro
+index ed81347..c3ff28c 100644
+--- a/qtbase/examples/opengl/opengl.pro
++++ b/qtbase/examples/opengl/opengl.pro
+@@ -13,6 +13,6 @@ qtHaveModule(widgets) {
+     !wince: SUBDIRS += \
+                 qopenglwidget \
+                 cube \
+-                textures \
+-                hellogles3
++                textures #\
++                #hellogles3
+ }
+diff --git a/qtbase/mkspecs/common/msvc-desktop.conf b/qtbase/mkspecs/common/msvc-desktop.conf
+index eec9e1f..bf92b43 100644
+--- a/qtbase/mkspecs/common/msvc-desktop.conf
++++ b/qtbase/mkspecs/common/msvc-desktop.conf
+@@ -30,7 +30,7 @@ QMAKE_YACCFLAGS         = -d
+ QMAKE_CFLAGS            = -nologo -Zc:wchar_t
+ QMAKE_CFLAGS_WARN_ON    = -W3
+ QMAKE_CFLAGS_WARN_OFF   = -W0
+-QMAKE_CFLAGS_RELEASE    = -O2 -MD
++QMAKE_CFLAGS_RELEASE    = -O2 -MD -Zi
+ QMAKE_CFLAGS_RELEASE_WITH_DEBUGINFO += -O2 -MD -Zi
+ QMAKE_CFLAGS_DEBUG      = -Zi -MDd
+ QMAKE_CFLAGS_YACC       =
+@@ -68,7 +68,7 @@ QMAKE_RUN_CXX_IMP_BATCH = $(CXX) -c $(CXXFLAGS) $(INCPATH) -Fo$@ @<<
+ 
+ QMAKE_LINK              = link
+ QMAKE_LFLAGS            = /NOLOGO /DYNAMICBASE /NXCOMPAT
+-QMAKE_LFLAGS_RELEASE    = /INCREMENTAL:NO
++QMAKE_LFLAGS_RELEASE    = /INCREMENTAL:NO /DEBUG
+ QMAKE_LFLAGS_RELEASE_WITH_DEBUGINFO = /DEBUG /OPT:REF /INCREMENTAL:NO
+ QMAKE_LFLAGS_DEBUG      = /DEBUG
+ QMAKE_LFLAGS_CONSOLE    = /SUBSYSTEM:CONSOLE
+diff --git a/qtbase/mkspecs/linux-g++-32/qmake.conf b/qtbase/mkspecs/linux-g++-32/qmake.conf
+index f09abee..ed546d7 100644
+--- a/qtbase/mkspecs/linux-g++-32/qmake.conf
++++ b/qtbase/mkspecs/linux-g++-32/qmake.conf
+@@ -8,8 +8,8 @@ QMAKE_INCREMENTAL_STYLE = sublib
+ 
+ include(../common/linux.conf)
+ 
+-QMAKE_CFLAGS            = -m32
+-QMAKE_LFLAGS            = -m32
++QMAKE_CFLAGS            = -m32 -D_FILE_OFFSET_BITS=64
++QMAKE_LFLAGS            = -m32 -D_FILE_OFFSET_BITS=64
+ 
+ include(../common/gcc-base-unix.conf)
+ include(../common/g++-unix.conf)
+diff --git a/qtbase/qmake/generators/win32/msvc_nmake.cpp b/qtbase/qmake/generators/win32/msvc_nmake.cpp
+index 27427db..7ec1982 100644
+--- a/qtbase/qmake/generators/win32/msvc_nmake.cpp
++++ b/qtbase/qmake/generators/win32/msvc_nmake.cpp
+@@ -37,7 +37,6 @@
+ 
+ #include <qregexp.h>
+ #include <qdir.h>
+-#include <qdiriterator.h>
+ #include <qset.h>
+ 
+ #include <windows/registry_p.h>
+@@ -428,17 +427,6 @@ void NmakeMakefileGenerator::init()
+     }
+ }
+ 
+-QStringList NmakeMakefileGenerator::sourceFilesForImplicitRulesFilter()
+-{
+-    QStringList filter;
+-    const QChar wildcard = QLatin1Char('*');
+-    foreach (const QString &ext, Option::c_ext)
+-        filter << wildcard + ext;
+-    foreach (const QString &ext, Option::cpp_ext)
+-        filter << wildcard + ext;
+-    return filter;
+-}
+-
+ void NmakeMakefileGenerator::writeImplicitRulesPart(QTextStream &t)
+ {
+     t << "####### Implicit rules\n\n";
+@@ -475,34 +463,6 @@ void NmakeMakefileGenerator::writeImplicitRulesPart(QTextStream &t)
+             }
+         }
+ 
+-        // nmake's inference rules might pick up the wrong files when encountering source files with
+-        // the same name in different directories. In this situation, turn inference rules off.
+-        QHash<QString, QString> fileNames;
+-        bool duplicatesFound = false;
+-        const QStringList sourceFilesFilter = sourceFilesForImplicitRulesFilter();
+-        QStringList fixifiedSourceDirs = fileFixify(source_directories.toList(), FileFixifyAbsolute);
+-        fixifiedSourceDirs.removeDuplicates();
+-        foreach (const QString &sourceDir, fixifiedSourceDirs) {
+-            QDirIterator dit(sourceDir, sourceFilesFilter, QDir::Files | QDir::NoDotAndDotDot);
+-            while (dit.hasNext()) {
+-                dit.next();
+-                QString &duplicate = fileNames[dit.fileName()];
+-                if (duplicate.isNull()) {
+-                    duplicate = dit.filePath();
+-                } else {
+-                    warn_msg(WarnLogic, "%s conflicts with %s", qPrintable(duplicate),
+-                             qPrintable(dit.filePath()));
+-                    duplicatesFound = true;
+-                }
+-            }
+-        }
+-        if (duplicatesFound) {
+-            useInferenceRules = false;
+-            warn_msg(WarnLogic, "Automatically turning off nmake's inference rules. (CONFIG += no_batch)");
+-        }
+-    }
+-
+-    if (useInferenceRules) {
+         // Batchmode doesn't use the non implicit rules QMAKE_RUN_CXX & QMAKE_RUN_CC
+         project->variables().remove("QMAKE_RUN_CXX");
+         project->variables().remove("QMAKE_RUN_CC");
+diff --git a/qtbase/qmake/generators/win32/msvc_nmake.h b/qtbase/qmake/generators/win32/msvc_nmake.h
+index df72ef3..985354d 100644
+--- a/qtbase/qmake/generators/win32/msvc_nmake.h
++++ b/qtbase/qmake/generators/win32/msvc_nmake.h
+@@ -47,7 +47,6 @@ class NmakeMakefileGenerator : public Win32MakefileGenerator
+     void writeLinkCommand(QTextStream &t, const QString &extraFlags = QString(), const QString &extraInlineFileContent = QString());
+     int msvcVersion() const;
+     void init();
+-    static QStringList sourceFilesForImplicitRulesFilter();
+ 
+ protected:
+     virtual void writeSubMakeCall(QTextStream &t, const QString &callPrefix,
+diff --git a/qtbase/src/3rdparty/harfbuzz-ng/harfbuzz-ng.pro b/qtbase/src/3rdparty/harfbuzz-ng/harfbuzz-ng.pro
+index edfc0e7..03d4bad 100644
+--- a/qtbase/src/3rdparty/harfbuzz-ng/harfbuzz-ng.pro
++++ b/qtbase/src/3rdparty/harfbuzz-ng/harfbuzz-ng.pro
+@@ -9,6 +9,7 @@ load(qt_helper_lib)
+ 
+ DEFINES += HAVE_CONFIG_H
+ DEFINES += HAVE_OT HB_NO_UNICODE_FUNCS HB_DISABLE_DEPRECATED
++DEFINES += QT_NAMESPACE=QT
+ 
+ # platform/compiler specific definitions
+ DEFINES += HAVE_ATEXIT
+diff --git a/qtbase/src/corelib/kernel/qcfsocketnotifier.cpp b/qtbase/src/corelib/kernel/qcfsocketnotifier.cpp
+index 7f4c26d..9c9f34b 100644
+--- a/qtbase/src/corelib/kernel/qcfsocketnotifier.cpp
++++ b/qtbase/src/corelib/kernel/qcfsocketnotifier.cpp
+@@ -41,8 +41,12 @@ QT_BEGIN_NAMESPACE
+ /**************************************************************************
+     Socket Notifiers
+  *************************************************************************/
+-void qt_mac_socket_callback(CFSocketRef s, CFSocketCallBackType callbackType, CFDataRef,
+-                            const void *, void *info)
++void QT_PREPEND_NAMESPACE(qt_mac_socket_callback)(
++        CFSocketRef s,
++	CFSocketCallBackType callbackType,
++	CFDataRef,
++	const void *,
++	void *info)
+ {
+ 
+     QCFSocketNotifier *cfSocketNotifier = static_cast<QCFSocketNotifier *>(info);
+diff --git a/qtbase/src/corelib/kernel/qcfsocketnotifier_p.h b/qtbase/src/corelib/kernel/qcfsocketnotifier_p.h
+index 947efec..9262e3d 100644
+--- a/qtbase/src/corelib/kernel/qcfsocketnotifier_p.h
++++ b/qtbase/src/corelib/kernel/qcfsocketnotifier_p.h
+@@ -52,6 +52,8 @@
+ 
+ QT_BEGIN_NAMESPACE
+ 
++void qt_mac_socket_callback(CFSocketRef, CFSocketCallBackType, CFDataRef, const void *, void *);
++
+ struct MacSocketInfo {
+     MacSocketInfo() : socket(0), runloop(0), readNotifier(0), writeNotifier(0),
+         readEnabled(false), writeEnabled(false) {}
+diff --git a/qtbase/src/corelib/tools/qlocale.cpp b/qtbase/src/corelib/tools/qlocale.cpp
+index 890a8fb..bf5e0dd 100644
+--- a/qtbase/src/corelib/tools/qlocale.cpp
++++ b/qtbase/src/corelib/tools/qlocale.cpp
+@@ -339,7 +339,7 @@ const QLocaleData *QLocaleData::findLocaleData(QLocale::Language language, QLoca
+ 
+     uint idx = locale_index[localeId.language_id];
+ 
+-    const QLocaleData *data = locale_data + idx;
++    const QLocaleData *data = qt_locale_data + idx;
+ 
+     if (idx == 0) // default language has no associated country
+         return data;
+@@ -356,7 +356,7 @@ const QLocaleData *QLocaleData::findLocaleData(QLocale::Language language, QLoca
+ 
+         // no match; try again with default script
+         localeId.script_id = QLocale::AnyScript;
+-        data = locale_data + idx;
++        data = qt_locale_data + idx;
+     }
+ 
+     if (localeId.script_id == QLocale::AnyScript && localeId.country_id == QLocale::AnyCountry)
+@@ -376,7 +376,7 @@ const QLocaleData *QLocaleData::findLocaleData(QLocale::Language language, QLoca
+         } while (data->m_language_id == localeId.language_id);
+     }
+ 
+-    return locale_data + idx;
++    return qt_locale_data + idx;
+ }
+ 
+ static bool parse_locale_tag(const QString &input, int &i, QString *result, const QString &separators)
+@@ -530,7 +530,7 @@ int qt_repeatCount(const QString &s, int i)
+ static const QLocaleData *default_data = 0;
+ static uint default_number_options = 0;
+ 
+-static const QLocaleData *const c_data = locale_data;
++static const QLocaleData *const c_data = qt_locale_data;
+ static QLocalePrivate *c_private()
+ {
+     static QLocalePrivate c_locale = { c_data, Q_BASIC_ATOMIC_INITIALIZER(1), QLocale::OmitGroupSeparator };
+@@ -640,7 +640,7 @@ static const QLocaleData *systemData()
+ 
+     return system_data;
+ #else
+-    return locale_data;
++    return qt_locale_data;
+ #endif
+ }
+ 
+@@ -696,7 +696,7 @@ QDataStream &operator>>(QDataStream &ds, QLocale &l)
+ #endif // QT_NO_DATASTREAM
+ 
+ 
+-static const int locale_data_size = sizeof(locale_data)/sizeof(QLocaleData) - 1;
++static const int locale_data_size = sizeof(qt_locale_data)/sizeof(QLocaleData) - 1;
+ 
+ Q_GLOBAL_STATIC_WITH_ARGS(QSharedDataPointer<QLocalePrivate>, defaultLocalePrivate,
+                           (QLocalePrivate::create(defaultData(), default_number_options)))
+@@ -2078,8 +2078,8 @@ QList<QLocale> QLocale::matchingLocales(QLocale::Language language,
+     QList<QLocale> result;
+     if (language == QLocale::AnyLanguage && script == QLocale::AnyScript && country == QLocale::AnyCountry)
+         result.reserve(locale_data_size);
+-    const QLocaleData *data = locale_data + locale_index[language];
+-    while ( (data != locale_data + locale_data_size)
++    const QLocaleData *data = qt_locale_data + locale_index[language];
++    while ( (data != qt_locale_data + locale_data_size)
+             && (language == QLocale::AnyLanguage || data->m_language_id == uint(language))) {
+         if ((script == QLocale::AnyScript || data->m_script_id == uint(script))
+             && (country == QLocale::AnyCountry || data->m_country_id == uint(country))) {
+@@ -2110,7 +2110,7 @@ QList<QLocale::Country> QLocale::countriesForLanguage(Language language)
+     }
+ 
+     unsigned language_id = language;
+-    const QLocaleData *data = locale_data + locale_index[language_id];
++    const QLocaleData *data = qt_locale_data + locale_index[language_id];
+     while (data->m_language_id == language_id) {
+         const QLocale::Country country = static_cast<Country>(data->m_country_id);
+         if (!result.contains(country))
+diff --git a/qtbase/src/corelib/tools/qlocale_data_p.h b/qtbase/src/corelib/tools/qlocale_data_p.h
+index a9e0b91..63a9e7b 100644
+--- a/qtbase/src/corelib/tools/qlocale_data_p.h
++++ b/qtbase/src/corelib/tools/qlocale_data_p.h
+@@ -1174,7 +1174,7 @@ static const quint16 locale_index[] = {
+      0 // trailing 0
+ };
+ 
+-static const QLocaleData locale_data[] = {
++static const QLocaleData qt_locale_data[] = {
+ //      lang   script terr    dec  group   list  prcnt   zero  minus  plus    exp quotStart quotEnd altQuotStart altQuotEnd lpStart lpMid lpEnd lpTwo sDtFmt lDtFmt sTmFmt lTmFmt ssMonth slMonth  sMonth lMonth  sDays  lDays  am,len      pm,len
+     {      1,     0,     0,    46,    44,    59,    37,    48,    45,    43,   101,    34,    34,    39,    39, 0,6 , 0,6 , 0,6 , 0,6 , 0,10 , 10,17 , 0,8 , 8,10 , 0,48 , 48,86 , 134,24 , 0,48 , 48,86 , 158,27 , 0,28 , 28,57 , 85,14 , 0,28 , 28,57 , 99,14 , 0,2 , 0,2 , {0,0,0},  0,0 , 0,7 , 0,4 , 4,0 , 0,0 , 0,0 ,     2,     1,     1,     6,     7 }, // C/AnyScript/AnyCountry
+     {      3,     7,    69,    46,    44,    59,    37,    48,    45,    43,   101,  8220,  8221,  8216,  8217, 0,6 , 0,6 , 0,6 , 0,6 , 27,8 , 35,18 , 18,7 , 25,12 , 185,48 , 233,111 , 134,24 , 185,48 , 233,111 , 134,24 , 113,28 , 141,55 , 85,14 , 113,28 , 141,55 , 85,14 , 2,2 , 2,2 , {69,84,66},  0,2 , 7,24 , 4,4 , 4,0 , 0,6 , 6,10 ,     2,     1,     7,     6,     7 }, // Oromo/Latin/Ethiopia
+diff --git a/qtbase/src/corelib/tools/qstring.h b/qtbase/src/corelib/tools/qstring.h
+index 1fbcff3..4dad2c5 100644
+--- a/qtbase/src/corelib/tools/qstring.h
++++ b/qtbase/src/corelib/tools/qstring.h
+@@ -644,11 +644,11 @@ public:
+ #if defined(QT_RESTRICTED_CAST_FROM_ASCII)
+     template <int N>
+     inline QString(const char (&ch)[N])
+-        : d(fromAscii_helper(ch, N - 1))
++        : d(fromAscii_helper(ch, int(strlen(ch))))
+     {}
+     template <int N>
+     inline QString &operator=(const char (&ch)[N])
+-    { return (*this = fromLatin1(ch, N - 1)); }
++    { return (*this = fromLatin1(ch, int(strlen(ch)))); }
+ #endif
+ #if !defined(QT_NO_CAST_FROM_ASCII) && !defined(QT_RESTRICTED_CAST_FROM_ASCII)
+     inline QT_ASCII_CAST_WARN QString(const char *ch)
+diff --git a/qtbase/src/gui/kernel/qwindowsysteminterface.cpp b/qtbase/src/gui/kernel/qwindowsysteminterface.cpp
+index e10ddf2..db0621e 100644
+--- a/qtbase/src/gui/kernel/qwindowsysteminterface.cpp
++++ b/qtbase/src/gui/kernel/qwindowsysteminterface.cpp
+@@ -879,6 +879,7 @@ Q_GUI_EXPORT bool qt_sendShortcutOverrideEvent(QObject *o, ulong timestamp, int
+     // window needs to be exposed and active and have a focus object), so we leave
+     // it as is for now. See QTBUG-48577.
+ 
++    Qt::KeyboardModifiers old_mods = QGuiApplicationPrivate::modifier_buttons;
+     QGuiApplicationPrivate::modifier_buttons = mods;
+ 
+     QKeyEvent qevent(QEvent::ShortcutOverride, k, mods, text, autorep, count);
+@@ -893,7 +894,9 @@ Q_GUI_EXPORT bool qt_sendShortcutOverrideEvent(QObject *o, ulong timestamp, int
+     }
+ 
+     // Then as QShortcutEvent
+-    return shortcutMap.tryShortcut(&qevent);
++    bool rc = shortcutMap.tryShortcut(&qevent);
++    QGuiApplicationPrivate::modifier_buttons = old_mods;
++    return rc;
+ #else
+     Q_UNUSED(o)
+     Q_UNUSED(timestamp)
+diff --git a/qtbase/src/gui/painting/qpagesize.cpp b/qtbase/src/gui/painting/qpagesize.cpp
+index c0aae60..82c3423 100644
+--- a/qtbase/src/gui/painting/qpagesize.cpp
++++ b/qtbase/src/gui/painting/qpagesize.cpp
+@@ -410,8 +410,10 @@ static QPageSize::PageSizeId qt_idForPpdKey(const QString &ppdKey, QSize *match
+     return QPageSize::Custom;
+ }
+ 
+-// Return id name for Windows ID
+-static QPageSize::PageSizeId qt_idForWindowsID(int windowsId, QSize *match = 0)
++// TODO QTBUG-38566 Export to use in QMacPrintEngine as OS X 10.6 thinks call
++// to QPageSize::id() is a reserved ObjC keyword, once 10.6 support is dropped
++// export can be removed and made a static function again.
++Q_GUI_EXPORT QPageSize::PageSizeId qt_idForWindowsID(int windowsId, QSize *match = 0)
+ {
+     // If outside known values then is Custom
+     if (windowsId <= DMPAPER_NONE || windowsId > DMPAPER_LAST)
+diff --git a/qtbase/src/platformsupport/eventdispatchers/qeventdispatcher_glib.cpp b/qtbase/src/platformsupport/eventdispatchers/qeventdispatcher_glib.cpp
+index 6877399..995d16a 100644
+--- a/qtbase/src/platformsupport/eventdispatchers/qeventdispatcher_glib.cpp
++++ b/qtbase/src/platformsupport/eventdispatchers/qeventdispatcher_glib.cpp
+@@ -111,8 +111,11 @@ QPAEventDispatcherGlib::~QPAEventDispatcherGlib()
+ 
+ bool QPAEventDispatcherGlib::processEvents(QEventLoop::ProcessEventsFlags flags)
+ {
++    QEventLoop::ProcessEventsFlags savedFlags = m_flags;
+     m_flags = flags;
+-    return QEventDispatcherGlib::processEvents(m_flags);
++    bool result = QEventDispatcherGlib::processEvents(m_flags);
++    m_flags = savedFlags;
++    return result;
+ }
+ 
+ QT_END_NAMESPACE
+diff --git a/qtbase/src/platformsupport/linuxaccessibility/dbusconnection.cpp b/qtbase/src/platformsupport/linuxaccessibility/dbusconnection.cpp
+index ae1ba18..d960e6d 100644
+--- a/qtbase/src/platformsupport/linuxaccessibility/dbusconnection.cpp
++++ b/qtbase/src/platformsupport/linuxaccessibility/dbusconnection.cpp
+@@ -69,6 +69,13 @@ DBusConnection::DBusConnection(QObject *parent)
+     connect(dbusWatcher, SIGNAL(serviceRegistered(QString)), this, SLOT(serviceRegistered()));
+ 
+     // If it is registered already, setup a11y right away
++    if (c.interface() == NULL)
++    {
++        // protect against errorless segfaults. QTBUG-50189
++        printf("Failed to create dbus connection. "
++	       "Are dbus libraries properly installed?\n");
++	exit(-1);
++    }
+     if (c.interface()->isServiceRegistered(A11Y_SERVICE))
+         serviceRegistered();
+ 
+diff --git a/qtbase/src/plugins/platforms/cocoa/qcocoawindow.mm b/qtbase/src/plugins/platforms/cocoa/qcocoawindow.mm
+index 00cb43c..9a38811 100644
+--- a/qtbase/src/plugins/platforms/cocoa/qcocoawindow.mm
++++ b/qtbase/src/plugins/platforms/cocoa/qcocoawindow.mm
+@@ -621,6 +621,7 @@ void QCocoaWindow::show(bool becauseOfAncestor)
+     }
+ }
+ 
++QPointF kludge;
+ void QCocoaWindow::setVisible(bool visible)
+ {
+     if (m_isNSWindowChild && m_hiddenByClipping)
+@@ -703,8 +704,8 @@ void QCocoaWindow::setVisible(bool visible)
+                     if (!(parentCocoaWindow && window()->transientParent()->isActive()) && window()->type() == Qt::Popup) {
+                         removeMonitor();
+                         monitor = [NSEvent addGlobalMonitorForEventsMatchingMask:NSLeftMouseDownMask|NSRightMouseDownMask|NSOtherMouseDownMask|NSMouseMovedMask handler:^(NSEvent *e) {
+-                            QPointF localPoint = qt_mac_flipPoint([NSEvent mouseLocation]);
+-                            QWindowSystemInterface::handleMouseEvent(window(), window()->mapFromGlobal(localPoint.toPoint()), localPoint,
++                            kludge = qt_mac_flipPoint([NSEvent mouseLocation]);
++                            QWindowSystemInterface::handleMouseEvent(window(), window()->mapFromGlobal(kludge.toPoint()), kludge,
+                                                                      cocoaButton2QtButton([e buttonNumber]));
+                         }];
+                     }
+diff --git a/qtbase/src/plugins/platforms/cocoa/qnsview.mm b/qtbase/src/plugins/platforms/cocoa/qnsview.mm
+index 0d80333..312815d 100644
+--- a/qtbase/src/plugins/platforms/cocoa/qnsview.mm
++++ b/qtbase/src/plugins/platforms/cocoa/qnsview.mm
+@@ -1451,14 +1451,12 @@ static QTabletEvent::TabletDevice wacomTabletDevice(NSEvent *theEvent)
+     quint32 nativeVirtualKey = [nsevent keyCode];
+ 
+     QChar ch = QChar::ReplacementCharacter;
+-    int keyCode = Qt::Key_unknown;
+-    if ([characters length] != 0) {
+-        if (((modifiers & Qt::MetaModifier) || (modifiers & Qt::AltModifier)) && ([charactersIgnoringModifiers length] != 0))
+-            ch = QChar([charactersIgnoringModifiers characterAtIndex:0]);
+-        else
+-            ch = QChar([characters characterAtIndex:0]);
+-        keyCode = [self convertKeyCode:ch];
+-    }
++    if ([characters length] != 0)
++        ch = QChar([characters characterAtIndex:0]);
++    else if ([charactersIgnoringModifiers length] != 0 && ((modifiers & Qt::MetaModifier) || (modifiers & Qt::AltModifier)))
++        ch = QChar([charactersIgnoringModifiers characterAtIndex:0]);
++
++    int keyCode = [self convertKeyCode:ch];
+ 
+     // we will send a key event unless the input method sets m_sendKeyEvent to false
+     m_sendKeyEvent = true;
+diff --git a/qtbase/src/plugins/platforms/cocoa/qprintengine_mac.mm b/qtbase/src/plugins/platforms/cocoa/qprintengine_mac.mm
+index edd1d65..4c40980 100644
+--- a/qtbase/src/plugins/platforms/cocoa/qprintengine_mac.mm
++++ b/qtbase/src/plugins/platforms/cocoa/qprintengine_mac.mm
+@@ -45,6 +45,11 @@ QT_BEGIN_NAMESPACE
+ 
+ extern QMarginsF qt_convertMargins(const QMarginsF &margins, QPageLayout::Unit fromUnits, QPageLayout::Unit toUnits);
+ 
++// TODO: QTBUG-38566 Use qt_idForWindowsId() as OS X 10.6 thinks call to
++// QPageSize::id() is a reserved ObjC keyword, once 10.6 support is dropped
++// this can be removed
++extern QPageSize::PageSizeId qt_idForWindowsID(int windowsId, QSize *match = 0);
++
+ QMacPrintEngine::QMacPrintEngine(QPrinter::PrinterMode mode) : QPaintEngine(*(new QMacPrintEnginePrivate))
+ {
+     Q_D(QMacPrintEngine);
+@@ -552,15 +557,18 @@ void QMacPrintEngine::setProperty(PrintEnginePropertyKey key, const QVariant &va
+         d->setPageSize(d->m_printDevice->supportedPageSize(value.toString()));
+         break;
+     case PPK_WindowsPageSize:
+-        d->setPageSize(QPageSize(QPageSize::id(value.toInt())));
++        // TODO: QTBUG-38566 Use qt_idForWindowsId() as OS X 10.6 thinks call
++        // to QPageSize::id() is a reserved ObjC keyword, once support for 10.6
++        // is dropped this can be reverted
++        d->setPageSize(QPageSize(qt_idForWindowsID(value.toInt())));
+         break;
+     case PPK_PrinterName: {
+-        QString id = value.toString();
+-        if (id.isEmpty())
+-            id = QCocoaPrinterSupport().defaultPrintDeviceId();
+-        else if (!QCocoaPrinterSupport().availablePrintDeviceIds().contains(id))
+-            break;
+-        d->m_printDevice.reset(new QCocoaPrintDevice(id));
++        QString pid = value.toString();
++	if (pid.isEmpty())
++	    pid = QCocoaPrinterSupport().defaultPrintDeviceId();
++	else if (!QCocoaPrinterSupport().availablePrintDeviceIds().contains(pid))
++	    break;
++        d->m_printDevice.reset(new QCocoaPrintDevice(pid));
+         PMPrinter printer = d->m_printDevice->macPrinter();
+         PMRetain(printer);
+         PMSessionSetCurrentPMPrinter(d->session(), printer);
+diff --git a/qtbase/src/plugins/platforms/xcb/qxcbclipboard.cpp b/qtbase/src/plugins/platforms/xcb/qxcbclipboard.cpp
+index 8b75c13..321d156 100644
+--- a/qtbase/src/plugins/platforms/xcb/qxcbclipboard.cpp
++++ b/qtbase/src/plugins/platforms/xcb/qxcbclipboard.cpp
+@@ -264,7 +264,7 @@ QXcbClipboard::QXcbClipboard(QXcbConnection *c)
+     , m_requestor(XCB_NONE)
+     , m_owner(XCB_NONE)
+     , m_incr_active(false)
+-    , m_clipboard_closing(false)
++    , m_clipboard_closing(0)
+     , m_incr_receive_time(0)
+ {
+     Q_ASSERT(QClipboard::Clipboard == 0);
+@@ -300,10 +300,11 @@ QXcbClipboard::QXcbClipboard(QXcbConnection *c)
+ 
+ QXcbClipboard::~QXcbClipboard()
+ {
+-    m_clipboard_closing = true;
++    m_clipboard_closing |= CLIPBOARD_CLOSING;
+     // Transfer the clipboard content to the clipboard manager if we own a selection
+-    if (m_timestamp[QClipboard::Clipboard] != XCB_CURRENT_TIME ||
+-            m_timestamp[QClipboard::Selection] != XCB_CURRENT_TIME) {
++    if ((m_clipboard_closing & CLIPBOARD_ATEXIT) == 0
++	&& (m_timestamp[QClipboard::Clipboard] != XCB_CURRENT_TIME ||
++	    m_timestamp[QClipboard::Selection] != XCB_CURRENT_TIME)) {
+ 
+         // First we check if there is a clipboard manager.
+         xcb_get_selection_owner_cookie_t cookie = xcb_get_selection_owner(xcb_connection(), atom(QXcbAtom::CLIPBOARD_MANAGER));
+@@ -540,7 +541,7 @@ xcb_atom_t QXcbClipboard::sendSelection(QMimeData *d, xcb_atom_t target, xcb_win
+         static xcb_atom_t motif_clip_temporary = atom(QXcbAtom::CLIP_TEMPORARY);
+         bool allow_incr = property != motif_clip_temporary;
+         // This 'bool' can be removed once there is a proper fix for QTBUG-32853
+-        if (m_clipboard_closing)
++        if (m_clipboard_closing & CLIPBOARD_CLOSING)
+             allow_incr = false;
+         // X_ChangeProperty protocol request is 24 bytes
+         const int increment = (xcb_get_maximum_request_length(xcb_connection()) * 4) - 24;
+diff --git a/qtbase/src/plugins/platforms/xcb/qxcbclipboard.h b/qtbase/src/plugins/platforms/xcb/qxcbclipboard.h
+index 10f0704..ebc8f75 100644
+--- a/qtbase/src/plugins/platforms/xcb/qxcbclipboard.h
++++ b/qtbase/src/plugins/platforms/xcb/qxcbclipboard.h
+@@ -102,8 +102,13 @@ private:
+     static const int clipboard_timeout;
+ 
+     bool m_incr_active;
+-    bool m_clipboard_closing;
++#define CLIPBOARD_CLOSING 1 << 0
++#define CLIPBOARD_ATEXIT  1 << 1
++    unsigned char m_clipboard_closing;
+     xcb_timestamp_t m_incr_receive_time;
++
++public:
++    void atexit_encountered() { m_clipboard_closing |= CLIPBOARD_ATEXIT; }
+ };
+ 
+ #endif // QT_NO_CLIPBOARD
+diff --git a/qtbase/src/plugins/platforms/xcb/qxcbintegration.cpp b/qtbase/src/plugins/platforms/xcb/qxcbintegration.cpp
+index 19e8b1d..7932e7b 100644
+--- a/qtbase/src/plugins/platforms/xcb/qxcbintegration.cpp
++++ b/qtbase/src/plugins/platforms/xcb/qxcbintegration.cpp
+@@ -84,6 +84,14 @@
+ 
+ QT_BEGIN_NAMESPACE
+ 
++__attribute__((visibility("default"))) void atexit_destroy_qxcbintegration(void)
++{
++  QXcbIntegration *inst = QXcbIntegration::instance();
++  if ( inst != NULL )
++    inst->atexit_destroy();
++}
++
++
+ // Find out if our parent process is gdb by looking at the 'exe' symlink under /proc,.
+ // or, for older Linuxes, read out 'cmdline'.
+ static bool runningUnderDebugger()
+@@ -183,6 +191,10 @@ QXcbIntegration::QXcbIntegration(const QStringList &parameters, int &argc, char
+     }
+ 
+     m_fontDatabase.reset(new QGenericUnixFontDatabase());
++
++    QByteArray noatexit = qgetenv("QXCBINTEGRATION_NO_ATEXIT");
++    if ( noatexit.isNull() )
++      atexit(atexit_destroy_qxcbintegration);
+ }
+ 
+ QXcbIntegration::~QXcbIntegration()
+@@ -454,4 +466,12 @@ void QXcbIntegration::sync()
+     }
+ }
+ 
++void QXcbIntegration::atexit_destroy()
++{
++    for (int i = 0; i < m_connections.size(); i++) {
++        m_connections.at(i)->clipboard()->atexit_encountered();
++    }
++    qDeleteAll(m_connections);
++}
++
+ QT_END_NAMESPACE
+diff --git a/qtbase/src/plugins/platforms/xcb/qxcbintegration.h b/qtbase/src/plugins/platforms/xcb/qxcbintegration.h
+index 4e2a3c2..3edffd6 100644
+--- a/qtbase/src/plugins/platforms/xcb/qxcbintegration.h
++++ b/qtbase/src/plugins/platforms/xcb/qxcbintegration.h
+@@ -121,6 +121,8 @@ private:
+     QScopedPointer<QPlatformServices> m_services;
+ 
+     friend class QXcbConnection; // access QPlatformIntegration::screenAdded()
++    friend void atexit_destroy_qxcbintegration(void);
++    void atexit_destroy();
+ 
+     mutable QByteArray m_wmClass;
+     const char *m_instanceName;
+diff --git a/qtbase/src/plugins/platforms/xcb/qxcbscreen.cpp b/qtbase/src/plugins/platforms/xcb/qxcbscreen.cpp
+index f3d381b..23a1ff8 100644
+--- a/qtbase/src/plugins/platforms/xcb/qxcbscreen.cpp
++++ b/qtbase/src/plugins/platforms/xcb/qxcbscreen.cpp
+@@ -589,7 +589,7 @@ void QXcbScreen::updateRefreshRate(xcb_randr_mode_t mode)
+             xcb_randr_mode_info_t *modeInfo = modesIter.data;
+             if (modeInfo->id == mode) {
+                 const uint32_t dotCount = modeInfo->htotal * modeInfo->vtotal;
+-                m_refreshRate = (dotCount != 0) ? modeInfo->dot_clock / dotCount : 0;
++                m_refreshRate = (dotCount != 0) ? modeInfo->dot_clock / dotCount : 60;
+                 m_mode = mode;
+                 break;
+             }
+diff --git a/qtbase/src/plugins/platforms/xcb/qxcbwindow.cpp b/qtbase/src/plugins/platforms/xcb/qxcbwindow.cpp
+index f97f570..659b0a8 100644
+--- a/qtbase/src/plugins/platforms/xcb/qxcbwindow.cpp
++++ b/qtbase/src/plugins/platforms/xcb/qxcbwindow.cpp
+@@ -601,7 +601,7 @@ QXcbWindow::~QXcbWindow()
+ void QXcbWindow::destroy()
+ {
+     if (connection()->focusWindow() == this)
+-        doFocusOut();
++        doFocusOut(true);
+     if (connection()->mouseGrabber() == this)
+         connection()->setMouseGrabber(Q_NULLPTR);
+ 
+@@ -908,14 +908,15 @@ static bool focusInPeeker(QXcbConnection *connection, xcb_generic_event_t *event
+     return false;
+ }
+ 
+-void QXcbWindow::doFocusOut()
++void QXcbWindow::doFocusOut(bool destroying)
+ {
+-    if (relayFocusToModalWindow())
++    bool relaying = relayFocusToModalWindow();
++    if (destroying || !relaying)
++        connection()->setFocusWindow(0);
++    if (relaying)
+         return;
+-    connection()->setFocusWindow(0);
+-    // Do not set the active window to 0 if there is a FocusIn coming.
+-    // There is however no equivalent for XPutBackEvent so register a
+-    // callback for QXcbConnection instead.
++    // Do not set the active window to 0 if there is a FocusIn coming
++    // and we are not destroying this window.
+     connection()->addPeekFunc(focusInPeeker);
+ }
+ 
+@@ -2377,7 +2378,7 @@ void QXcbWindow::handleFocusInEvent(const xcb_focus_in_event_t *)
+ 
+ void QXcbWindow::handleFocusOutEvent(const xcb_focus_out_event_t *)
+ {
+-    doFocusOut();
++    doFocusOut(false);
+ }
+ 
+ void QXcbWindow::updateSyncRequestCounter()
+diff --git a/qtbase/src/plugins/platforms/xcb/qxcbwindow.h b/qtbase/src/plugins/platforms/xcb/qxcbwindow.h
+index d2c02fe..4201c34 100644
+--- a/qtbase/src/plugins/platforms/xcb/qxcbwindow.h
++++ b/qtbase/src/plugins/platforms/xcb/qxcbwindow.h
+@@ -199,7 +199,7 @@ protected:
+ 
+     bool relayFocusToModalWindow() const;
+     void doFocusIn();
+-    void doFocusOut();
++    void doFocusOut(bool destroying);
+ 
+     bool compressExposeEvent(QRegion &exposeRegion);
+ 
+diff --git a/qtbase/src/plugins/platformthemes/gtk2/qgtk2dialoghelpers.cpp b/qtbase/src/plugins/platformthemes/gtk2/qgtk2dialoghelpers.cpp
+index 857f373..4edb71c 100644
+--- a/qtbase/src/plugins/platformthemes/gtk2/qgtk2dialoghelpers.cpp
++++ b/qtbase/src/plugins/platformthemes/gtk2/qgtk2dialoghelpers.cpp
+@@ -473,7 +473,7 @@ void QGtk2FileDialogHelper::setNameFilters(const QStringList &filters)
+ 
+     foreach (const QString &filter, filters) {
+         GtkFileFilter *gtkFilter = gtk_file_filter_new();
+-        const QString name = filter.left(filter.indexOf(QLatin1Char('(')));
++	const QString name = filter.left(filter.lastIndexOf(QLatin1Char('(')));
+         const QStringList extensions = cleanFilterList(filter);
+ 
+         gtk_file_filter_set_name(gtkFilter, name.isEmpty() ? extensions.join(QStringLiteral(", ")).toUtf8() : name.toUtf8());
+diff --git a/qtbase/src/widgets/dialogs/qfontdialog.cpp b/qtbase/src/widgets/dialogs/qfontdialog.cpp
+index d017794..6644f26 100644
+--- a/qtbase/src/widgets/dialogs/qfontdialog.cpp
++++ b/qtbase/src/widgets/dialogs/qfontdialog.cpp
+@@ -100,7 +100,7 @@ QFontListView::QFontListView(QWidget *parent)
+ }
+ 
+ static const Qt::WindowFlags DefaultWindowFlags =
+-        Qt::Dialog | Qt::WindowSystemMenuHint;
++        Qt::Dialog | Qt::WindowSystemMenuHint | Qt::WindowCloseButtonHint;
+ 
+ QFontDialogPrivate::QFontDialogPrivate()
+     : writingSystem(QFontDatabase::Any),
+diff --git a/qtbase/src/widgets/kernel/qwidget.cpp b/qtbase/src/widgets/kernel/qwidget.cpp
+index 5bff305..08d9151 100644
+--- a/qtbase/src/widgets/kernel/qwidget.cpp
++++ b/qtbase/src/widgets/kernel/qwidget.cpp
+@@ -7449,7 +7449,7 @@ bool QWidget::restoreGeometry(const QByteArray &geometry)
+         // set geometry before setting the window state to make
+         // sure the window is maximized to the right screen.
+         Qt::WindowStates ws = windowState();
+-#ifndef Q_OS_WIN
++#if !defined(Q_OS_WIN) && !defined(Q_OS_LINUX)
+         setGeometry(restoredNormalGeometry);
+ #else
+         if (ws & Qt::WindowFullScreen) {
+@@ -7466,7 +7466,7 @@ bool QWidget::restoreGeometry(const QByteArray &geometry)
+         } else {
+             setGeometry(restoredNormalGeometry);
+         }
+-#endif // Q_OS_WIN
++#endif // Q_OS_WIN && Q_OS_LINUX
+         if (maximized)
+             ws |= Qt::WindowMaximized;
+         if (fullScreen)
+diff --git a/qtbase/src/widgets/styles/qmacstyle_mac.mm b/qtbase/src/widgets/styles/qmacstyle_mac.mm
+index ac23512..bcb55cb 100644
+--- a/qtbase/src/widgets/styles/qmacstyle_mac.mm
++++ b/qtbase/src/widgets/styles/qmacstyle_mac.mm
+@@ -871,10 +871,6 @@ static QSize qt_aqua_get_known_size(QStyle::ContentsType ct, const QWidget *widg
+             gbi.size = sz == QAquaSizeSmall ? kHIThemeGrowBoxSizeSmall : kHIThemeGrowBoxSizeNormal;
+             if (HIThemeGetGrowBoxBounds(&p, &gbi, &r) == noErr) {
+                 int width = 0;
+-#ifndef QT_NO_MDIAREA
+-            if (widg && qobject_cast<QMdiSubWindow *>(widg->parentWidget()))
+-                width = r.size.width;
+-#endif
+                 ret = QSize(width, r.size.height);
+             }
+         }
+@@ -1667,14 +1663,13 @@ void QMacStylePrivate::getSliderInfo(QStyle::ComplexControl cc, const QStyleOpti
+         else
+             tdi->max = 10 * slider->rect.height();
+ 
+-        int range = slider->maximum - slider->minimum;
+-        if (range == 0) {
+-            tdi->value = 0;
+-        } else if (usePlainKnob || slider->orientation == Qt::Horizontal) {
++	if (usePlainKnob || slider->orientation == Qt::Horizontal) {
+             int endsCorrection = usePlainKnob ? 25 : 10;
+-            tdi->value = (tdi->max + 2 * endsCorrection) * (slider->sliderPosition - slider->minimum) / range - endsCorrection;
++	    tdi->value = (tdi->max + 2 * endsCorrection) * (slider->sliderPosition - slider->minimum)
++	            / (slider->maximum - slider->minimum) - endsCorrection;
+         } else {
+-            tdi->value = (tdi->max + 30) * (slider->sliderPosition - slider->minimum) / range - 20;
++	    tdi->value = (tdi->max + 30) * (slider->sliderPosition - slider->minimum)
++	            / (slider->maximum - slider->minimum) - 20;
+         }
+     }
+     tdi->attributes = kThemeTrackShowThumb;
+@@ -1841,23 +1836,23 @@ NSView *QMacStylePrivate::cocoaControl(QCocoaWidget widget) const
+         switch (widget.first) {
+         case QCocoaArrowButton: {
+             NSButton *bc = (NSButton *)bv;
+-            bc.buttonType = NSOnOffButton;
++	    [bc setButtonType:NSOnOffButton];
+             bc.bezelStyle = NSDisclosureBezelStyle;
+             break;
+         }
+         case QCocoaCheckBox: {
+             NSButton *bc = (NSButton *)bv;
+-            bc.buttonType = NSSwitchButton;
++	    [bc setButtonType:NSSwitchButton];
+             break;
+         }
+         case QCocoaRadioButton: {
+             NSButton *bc = (NSButton *)bv;
+-            bc.buttonType = NSRadioButton;
++	    [bc setButtonType:NSRadioButton];
+             break;
+         }
+         case QCocoaPushButton: {
+             NSButton *bc = (NSButton *)bv;
+-            bc.buttonType = NSMomentaryPushButton;
++	    [bc setButtonType:NSMomentaryPushButton];
+             bc.bezelStyle = NSRoundedBezelStyle;
+             break;
+         }
+@@ -2043,7 +2038,7 @@ void QMacStylePrivate::drawColorlessButton(const HIRect &macRect, HIThemeButtonD
+             QCocoaWidget cw = cocoaWidgetFromHIThemeButtonKind(bdi->kind);
+             NSButton *bc = (NSButton *)cocoaControl(cw);
+             [bc highlight:pressed];
+-            bc.enabled = bdi->state != kThemeStateUnavailable && bdi->state != kThemeStateUnavailableInactive;
++	    [bc setEnabled:bdi->state != kThemeStateUnavailable && bdi->state != kThemeStateUnavailableInactive];
+             bc.allowsMixedState = YES;
+             bc.state = bdi->value == kThemeButtonOn ? NSOnState :
+                        bdi->value == kThemeButtonMixed ? NSMixedState : NSOffState;
+@@ -5575,7 +5570,7 @@ void QMacStyle::drawComplexControl(ComplexControl cc, const QStyleOptionComplex
+                         sl.minValue = slider->minimum;
+                         sl.maxValue = slider->maximum;
+                         sl.intValue = slider->sliderValue;
+-                        sl.enabled = slider->state & QStyle::State_Enabled;
++			[sl setEnabled:slider->state & QStyle::State_Enabled];
+                         d->drawNSViewInRect(cw, sl, opt->rect, p, widget != 0, ^(NSRect rect, CGContextRef ctx) {
+                                                 if (slider->upsideDown) {
+                                                     if (isHorizontal) {
+diff --git a/qtbase/src/widgets/widgets/qmenu.cpp b/qtbase/src/widgets/widgets/qmenu.cpp
+index 744fecb..d21e86c 100644
+--- a/qtbase/src/widgets/widgets/qmenu.cpp
++++ b/qtbase/src/widgets/widgets/qmenu.cpp
+@@ -2718,7 +2718,7 @@ QMenu::event(QEvent *e)
+         d->updateActionRects();
+         d->sloppyState.reset();
+         if (d->currentAction)
+-            d->popupAction(d->currentAction, 0, false);
++            d->setCurrentAction(d->currentAction);
+         break;
+ #ifndef QT_NO_TOOLTIP
+     case QEvent::ToolTip:
+diff --git a/qtbase/tests/auto/corelib/tools/qlocale/tst_qlocale.cpp b/qtbase/tests/auto/corelib/tools/qlocale/tst_qlocale.cpp
+index 5f04657..d006158 100644
+--- a/qtbase/tests/auto/corelib/tools/qlocale/tst_qlocale.cpp
++++ b/qtbase/tests/auto/corelib/tools/qlocale/tst_qlocale.cpp
+@@ -1689,7 +1689,7 @@ void tst_QLocale::negativeNumbers()
+ #include <private/qlocale_p.h>
+ #include <private/qlocale_data_p.h>
+ 
+-static const int locale_data_count = sizeof(locale_data)/sizeof(locale_data[0]);
++static const int locale_data_count = sizeof(qt_locale_data)/sizeof(qt_locale_data[0]);
+ 
+ void tst_QLocale::testNames_data()
+ {
+@@ -1697,7 +1697,7 @@ void tst_QLocale::testNames_data()
+     QTest::addColumn<int>("country");
+ 
+     for (int i = 0; i < locale_data_count; ++i) {
+-        const QLocaleData &item = locale_data[i];
++        const QLocaleData &item = qt_locale_data[i];
+ 
+         const QString testName = QString::fromLatin1("data_%1 (%2/%3)").arg(i)
+                 .arg(QLocale::languageToString((QLocale::Language)item.m_language_id))
+diff --git a/qttools/src/assistant/assistant/openpagesmanager.cpp b/qttools/src/assistant/assistant/openpagesmanager.cpp
+index 2332efb..2d8bff9 100644
+--- a/qttools/src/assistant/assistant/openpagesmanager.cpp
++++ b/qttools/src/assistant/assistant/openpagesmanager.cpp
+@@ -173,13 +173,14 @@ HelpViewer *OpenPagesManager::createPage()
+ void OpenPagesManager::closeCurrentPage()
+ {
+     TRACE_OBJ
+-    Q_ASSERT(m_model->rowCount() > 1);
+-    const QModelIndexList selectedIndexes
+-        = m_openPagesWidget->selectionModel()->selectedRows();
+-    if (selectedIndexes.isEmpty())
+-        return;
+-    Q_ASSERT(selectedIndexes.count() == 1);
+-    removePage(selectedIndexes.first().row());
++    if (m_model->rowCount() > 1) {
++        const QModelIndexList selectedIndexes
++	  = m_openPagesWidget->selectionModel()->selectedRows();
++	if (selectedIndexes.isEmpty())
++	  return;
++	if (selectedIndexes.count() == 1)
++	  removePage(selectedIndexes.first().row());
++    }
+ }
+ 
+ HelpViewer *OpenPagesManager::createPage(const QUrl &url, bool fromSearch)
+diff --git a/qttools/src/src.pro b/qttools/src/src.pro
+index 387d54f..494898f 100644
+--- a/qttools/src/src.pro
++++ b/qttools/src/src.pro
+@@ -14,7 +14,6 @@ qtHaveModule(widgets) {
+ }
+ 
+ SUBDIRS += linguist \
+-    qdoc \
+     qtplugininfo
+ if(!android|android_app):!ios: SUBDIRS += qtpaths
+ 

@@ -52,6 +52,8 @@
 
 QT_BEGIN_NAMESPACE
 
+void qt_mac_socket_callback(CFSocketRef, CFSocketCallBackType, CFDataRef, const void *, void *);
+
 struct MacSocketInfo {
     MacSocketInfo() : socket(0), runloop(0), readNotifier(0), writeNotifier(0),
         readEnabled(false), writeEnabled(false) {}

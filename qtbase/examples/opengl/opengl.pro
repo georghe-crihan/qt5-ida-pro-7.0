@@ -13,6 +13,6 @@ qtHaveModule(widgets) {
     !wince: SUBDIRS += \
                 qopenglwidget \
                 cube \
-                textures \
-                hellogles3
+                textures #\
+                #hellogles3
 }

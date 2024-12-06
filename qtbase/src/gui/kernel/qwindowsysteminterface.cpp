@@ -879,6 +879,7 @@ Q_GUI_EXPORT bool qt_sendShortcutOverrideEvent(QObject *o, ulong timestamp, int 
     // window needs to be exposed and active and have a focus object), so we leave
     // it as is for now. See QTBUG-48577.
 
+    Qt::KeyboardModifiers old_mods = QGuiApplicationPrivate::modifier_buttons;
     QGuiApplicationPrivate::modifier_buttons = mods;
 
     QKeyEvent qevent(QEvent::ShortcutOverride, k, mods, text, autorep, count);
@@ -893,7 +894,9 @@ Q_GUI_EXPORT bool qt_sendShortcutOverrideEvent(QObject *o, ulong timestamp, int 
     }
 
     // Then as QShortcutEvent
-    return shortcutMap.tryShortcut(&qevent);
+    bool rc = shortcutMap.tryShortcut(&qevent);
+    QGuiApplicationPrivate::modifier_buttons = old_mods;
+    return rc;
 #else
     Q_UNUSED(o)
     Q_UNUSED(timestamp)

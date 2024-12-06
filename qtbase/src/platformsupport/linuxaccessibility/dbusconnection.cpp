@@ -69,6 +69,13 @@ DBusConnection::DBusConnection(QObject *parent)
     connect(dbusWatcher, SIGNAL(serviceRegistered(QString)), this, SLOT(serviceRegistered()));
 
     // If it is registered already, setup a11y right away
+    if (c.interface() == NULL)
+    {
+        // protect against errorless segfaults. QTBUG-50189
+        printf("Failed to create dbus connection. "
+	       "Are dbus libraries properly installed?\n");
+	exit(-1);
+    }
     if (c.interface()->isServiceRegistered(A11Y_SERVICE))
         serviceRegistered();
 

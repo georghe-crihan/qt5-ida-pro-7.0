@@ -9,6 +9,7 @@ load(qt_helper_lib)
 
 DEFINES += HAVE_CONFIG_H
 DEFINES += HAVE_OT HB_NO_UNICODE_FUNCS HB_DISABLE_DEPRECATED
+DEFINES += QT_NAMESPACE=QT
 
 # platform/compiler specific definitions
 DEFINES += HAVE_ATEXIT

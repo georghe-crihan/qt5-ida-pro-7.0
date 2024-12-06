@@ -410,8 +410,10 @@ static QPageSize::PageSizeId qt_idForPpdKey(const QString &ppdKey, QSize *match 
     return QPageSize::Custom;
 }
 
-// Return id name for Windows ID
-static QPageSize::PageSizeId qt_idForWindowsID(int windowsId, QSize *match = 0)
+// TODO QTBUG-38566 Export to use in QMacPrintEngine as OS X 10.6 thinks call
+// to QPageSize::id() is a reserved ObjC keyword, once 10.6 support is dropped
+// export can be removed and made a static function again.
+Q_GUI_EXPORT QPageSize::PageSizeId qt_idForWindowsID(int windowsId, QSize *match = 0)
 {
     // If outside known values then is Custom
     if (windowsId <= DMPAPER_NONE || windowsId > DMPAPER_LAST)

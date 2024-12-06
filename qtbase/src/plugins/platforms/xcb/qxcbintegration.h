@@ -121,6 +121,8 @@ private:
     QScopedPointer<QPlatformServices> m_services;
 
     friend class QXcbConnection; // access QPlatformIntegration::screenAdded()
+    friend void atexit_destroy_qxcbintegration(void);
+    void atexit_destroy();
 
     mutable QByteArray m_wmClass;
     const char *m_instanceName;

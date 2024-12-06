@@ -601,7 +601,7 @@ QXcbWindow::~QXcbWindow()
 void QXcbWindow::destroy()
 {
     if (connection()->focusWindow() == this)
-        doFocusOut();
+        doFocusOut(true);
     if (connection()->mouseGrabber() == this)
         connection()->setMouseGrabber(Q_NULLPTR);
 
@@ -908,14 +908,15 @@ static bool focusInPeeker(QXcbConnection *connection, xcb_generic_event_t *event
     return false;
 }
 
-void QXcbWindow::doFocusOut()
+void QXcbWindow::doFocusOut(bool destroying)
 {
-    if (relayFocusToModalWindow())
+    bool relaying = relayFocusToModalWindow();
+    if (destroying || !relaying)
+        connection()->setFocusWindow(0);
+    if (relaying)
         return;
-    connection()->setFocusWindow(0);
-    // Do not set the active window to 0 if there is a FocusIn coming.
-    // There is however no equivalent for XPutBackEvent so register a
-    // callback for QXcbConnection instead.
+    // Do not set the active window to 0 if there is a FocusIn coming
+    // and we are not destroying this window.
     connection()->addPeekFunc(focusInPeeker);
 }
 
@@ -2377,7 +2378,7 @@ void QXcbWindow::handleFocusInEvent(const xcb_focus_in_event_t *)
 
 void QXcbWindow::handleFocusOutEvent(const xcb_focus_out_event_t *)
 {
-    doFocusOut();
+    doFocusOut(false);
 }
 
 void QXcbWindow::updateSyncRequestCounter()

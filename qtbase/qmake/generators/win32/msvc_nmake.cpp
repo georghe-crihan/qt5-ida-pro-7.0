@@ -37,7 +37,6 @@
 
 #include <qregexp.h>
 #include <qdir.h>
-#include <qdiriterator.h>
 #include <qset.h>
 
 #include <windows/registry_p.h>
@@ -428,17 +427,6 @@ void NmakeMakefileGenerator::init()
     }
 }
 
-QStringList NmakeMakefileGenerator::sourceFilesForImplicitRulesFilter()
-{
-    QStringList filter;
-    const QChar wildcard = QLatin1Char('*');
-    foreach (const QString &ext, Option::c_ext)
-        filter << wildcard + ext;
-    foreach (const QString &ext, Option::cpp_ext)
-        filter << wildcard + ext;
-    return filter;
-}
-
 void NmakeMakefileGenerator::writeImplicitRulesPart(QTextStream &t)
 {
     t << "####### Implicit rules\n\n";
@@ -475,34 +463,6 @@ void NmakeMakefileGenerator::writeImplicitRulesPart(QTextStream &t)
             }
         }
 
-        // nmake's inference rules might pick up the wrong files when encountering source files with
-        // the same name in different directories. In this situation, turn inference rules off.
-        QHash<QString, QString> fileNames;
-        bool duplicatesFound = false;
-        const QStringList sourceFilesFilter = sourceFilesForImplicitRulesFilter();
-        QStringList fixifiedSourceDirs = fileFixify(source_directories.toList(), FileFixifyAbsolute);
-        fixifiedSourceDirs.removeDuplicates();
-        foreach (const QString &sourceDir, fixifiedSourceDirs) {
-            QDirIterator dit(sourceDir, sourceFilesFilter, QDir::Files | QDir::NoDotAndDotDot);
-            while (dit.hasNext()) {
-                dit.next();
-                QString &duplicate = fileNames[dit.fileName()];
-                if (duplicate.isNull()) {
-                    duplicate = dit.filePath();
-                } else {
-                    warn_msg(WarnLogic, "%s conflicts with %s", qPrintable(duplicate),
-                             qPrintable(dit.filePath()));
-                    duplicatesFound = true;
-                }
-            }
-        }
-        if (duplicatesFound) {
-            useInferenceRules = false;
-            warn_msg(WarnLogic, "Automatically turning off nmake's inference rules. (CONFIG += no_batch)");
-        }
-    }
-
-    if (useInferenceRules) {
         // Batchmode doesn't use the non implicit rules QMAKE_RUN_CXX & QMAKE_RUN_CC
         project->variables().remove("QMAKE_RUN_CXX");
         project->variables().remove("QMAKE_RUN_CC");

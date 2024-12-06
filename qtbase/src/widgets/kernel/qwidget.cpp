@@ -7449,7 +7449,7 @@ bool QWidget::restoreGeometry(const QByteArray &geometry)
         // set geometry before setting the window state to make
         // sure the window is maximized to the right screen.
         Qt::WindowStates ws = windowState();
-#ifndef Q_OS_WIN
+#if !defined(Q_OS_WIN) && !defined(Q_OS_LINUX)
         setGeometry(restoredNormalGeometry);
 #else
         if (ws & Qt::WindowFullScreen) {
@@ -7466,7 +7466,7 @@ bool QWidget::restoreGeometry(const QByteArray &geometry)
         } else {
             setGeometry(restoredNormalGeometry);
         }
-#endif // Q_OS_WIN
+#endif // Q_OS_WIN && Q_OS_LINUX
         if (maximized)
             ws |= Qt::WindowMaximized;
         if (fullScreen)

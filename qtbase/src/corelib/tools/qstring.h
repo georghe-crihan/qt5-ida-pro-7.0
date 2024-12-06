@@ -644,11 +644,11 @@ public:
 #if defined(QT_RESTRICTED_CAST_FROM_ASCII)
     template <int N>
     inline QString(const char (&ch)[N])
-        : d(fromAscii_helper(ch, N - 1))
+        : d(fromAscii_helper(ch, int(strlen(ch))))
     {}
     template <int N>
     inline QString &operator=(const char (&ch)[N])
-    { return (*this = fromLatin1(ch, N - 1)); }
+    { return (*this = fromLatin1(ch, int(strlen(ch)))); }
 #endif
 #if !defined(QT_NO_CAST_FROM_ASCII) && !defined(QT_RESTRICTED_CAST_FROM_ASCII)
     inline QT_ASCII_CAST_WARN QString(const char *ch)

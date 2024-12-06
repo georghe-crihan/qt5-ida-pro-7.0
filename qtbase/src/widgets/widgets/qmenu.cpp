@@ -2718,7 +2718,7 @@ QMenu::event(QEvent *e)
         d->updateActionRects();
         d->sloppyState.reset();
         if (d->currentAction)
-            d->popupAction(d->currentAction, 0, false);
+            d->setCurrentAction(d->currentAction);
         break;
 #ifndef QT_NO_TOOLTIP
     case QEvent::ToolTip:

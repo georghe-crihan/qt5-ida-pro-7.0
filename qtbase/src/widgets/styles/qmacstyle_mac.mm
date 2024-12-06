@@ -871,10 +871,6 @@ static QSize qt_aqua_get_known_size(QStyle::ContentsType ct, const QWidget *widg
             gbi.size = sz == QAquaSizeSmall ? kHIThemeGrowBoxSizeSmall : kHIThemeGrowBoxSizeNormal;
             if (HIThemeGetGrowBoxBounds(&p, &gbi, &r) == noErr) {
                 int width = 0;
-#ifndef QT_NO_MDIAREA
-            if (widg && qobject_cast<QMdiSubWindow *>(widg->parentWidget()))
-                width = r.size.width;
-#endif
                 ret = QSize(width, r.size.height);
             }
         }
@@ -1667,14 +1663,13 @@ void QMacStylePrivate::getSliderInfo(QStyle::ComplexControl cc, const QStyleOpti
         else
             tdi->max = 10 * slider->rect.height();
 
-        int range = slider->maximum - slider->minimum;
-        if (range == 0) {
-            tdi->value = 0;
-        } else if (usePlainKnob || slider->orientation == Qt::Horizontal) {
+	if (usePlainKnob || slider->orientation == Qt::Horizontal) {
             int endsCorrection = usePlainKnob ? 25 : 10;
-            tdi->value = (tdi->max + 2 * endsCorrection) * (slider->sliderPosition - slider->minimum) / range - endsCorrection;
+	    tdi->value = (tdi->max + 2 * endsCorrection) * (slider->sliderPosition - slider->minimum)
+	            / (slider->maximum - slider->minimum) - endsCorrection;
         } else {
-            tdi->value = (tdi->max + 30) * (slider->sliderPosition - slider->minimum) / range - 20;
+	    tdi->value = (tdi->max + 30) * (slider->sliderPosition - slider->minimum)
+	            / (slider->maximum - slider->minimum) - 20;
         }
     }
     tdi->attributes = kThemeTrackShowThumb;
@@ -1841,23 +1836,23 @@ NSView *QMacStylePrivate::cocoaControl(QCocoaWidget widget) const
         switch (widget.first) {
         case QCocoaArrowButton: {
             NSButton *bc = (NSButton *)bv;
-            bc.buttonType = NSOnOffButton;
+	    [bc setButtonType:NSOnOffButton];
             bc.bezelStyle = NSDisclosureBezelStyle;
             break;
         }
         case QCocoaCheckBox: {
             NSButton *bc = (NSButton *)bv;
-            bc.buttonType = NSSwitchButton;
+	    [bc setButtonType:NSSwitchButton];
             break;
         }
         case QCocoaRadioButton: {
             NSButton *bc = (NSButton *)bv;
-            bc.buttonType = NSRadioButton;
+	    [bc setButtonType:NSRadioButton];
             break;
         }
         case QCocoaPushButton: {
             NSButton *bc = (NSButton *)bv;
-            bc.buttonType = NSMomentaryPushButton;
+	    [bc setButtonType:NSMomentaryPushButton];
             bc.bezelStyle = NSRoundedBezelStyle;
             break;
         }
@@ -2043,7 +2038,7 @@ void QMacStylePrivate::drawColorlessButton(const HIRect &macRect, HIThemeButtonD
             QCocoaWidget cw = cocoaWidgetFromHIThemeButtonKind(bdi->kind);
             NSButton *bc = (NSButton *)cocoaControl(cw);
             [bc highlight:pressed];
-            bc.enabled = bdi->state != kThemeStateUnavailable && bdi->state != kThemeStateUnavailableInactive;
+	    [bc setEnabled:bdi->state != kThemeStateUnavailable && bdi->state != kThemeStateUnavailableInactive];
             bc.allowsMixedState = YES;
             bc.state = bdi->value == kThemeButtonOn ? NSOnState :
                        bdi->value == kThemeButtonMixed ? NSMixedState : NSOffState;
@@ -5575,7 +5570,7 @@ void QMacStyle::drawComplexControl(ComplexControl cc, const QStyleOptionComplex 
                         sl.minValue = slider->minimum;
                         sl.maxValue = slider->maximum;
                         sl.intValue = slider->sliderValue;
-                        sl.enabled = slider->state & QStyle::State_Enabled;
+			[sl setEnabled:slider->state & QStyle::State_Enabled];
                         d->drawNSViewInRect(cw, sl, opt->rect, p, widget != 0, ^(NSRect rect, CGContextRef ctx) {
                                                 if (slider->upsideDown) {
                                                     if (isHorizontal) {

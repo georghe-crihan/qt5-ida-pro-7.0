@@ -339,7 +339,7 @@ const QLocaleData *QLocaleData::findLocaleData(QLocale::Language language, QLoca
 
     uint idx = locale_index[localeId.language_id];
 
-    const QLocaleData *data = locale_data + idx;
+    const QLocaleData *data = qt_locale_data + idx;
 
     if (idx == 0) // default language has no associated country
         return data;
@@ -356,7 +356,7 @@ const QLocaleData *QLocaleData::findLocaleData(QLocale::Language language, QLoca
 
         // no match; try again with default script
         localeId.script_id = QLocale::AnyScript;
-        data = locale_data + idx;
+        data = qt_locale_data + idx;
     }
 
     if (localeId.script_id == QLocale::AnyScript && localeId.country_id == QLocale::AnyCountry)
@@ -376,7 +376,7 @@ const QLocaleData *QLocaleData::findLocaleData(QLocale::Language language, QLoca
         } while (data->m_language_id == localeId.language_id);
     }
 
-    return locale_data + idx;
+    return qt_locale_data + idx;
 }
 
 static bool parse_locale_tag(const QString &input, int &i, QString *result, const QString &separators)
@@ -530,7 +530,7 @@ int qt_repeatCount(const QString &s, int i)
 static const QLocaleData *default_data = 0;
 static uint default_number_options = 0;
 
-static const QLocaleData *const c_data = locale_data;
+static const QLocaleData *const c_data = qt_locale_data;
 static QLocalePrivate *c_private()
 {
     static QLocalePrivate c_locale = { c_data, Q_BASIC_ATOMIC_INITIALIZER(1), QLocale::OmitGroupSeparator };
@@ -640,7 +640,7 @@ static const QLocaleData *systemData()
 
     return system_data;
 #else
-    return locale_data;
+    return qt_locale_data;
 #endif
 }
 
@@ -696,7 +696,7 @@ QDataStream &operator>>(QDataStream &ds, QLocale &l)
 #endif // QT_NO_DATASTREAM
 
 
-static const int locale_data_size = sizeof(locale_data)/sizeof(QLocaleData) - 1;
+static const int locale_data_size = sizeof(qt_locale_data)/sizeof(QLocaleData) - 1;
 
 Q_GLOBAL_STATIC_WITH_ARGS(QSharedDataPointer<QLocalePrivate>, defaultLocalePrivate,
                           (QLocalePrivate::create(defaultData(), default_number_options)))
@@ -2078,8 +2078,8 @@ QList<QLocale> QLocale::matchingLocales(QLocale::Language language,
     QList<QLocale> result;
     if (language == QLocale::AnyLanguage && script == QLocale::AnyScript && country == QLocale::AnyCountry)
         result.reserve(locale_data_size);
-    const QLocaleData *data = locale_data + locale_index[language];
-    while ( (data != locale_data + locale_data_size)
+    const QLocaleData *data = qt_locale_data + locale_index[language];
+    while ( (data != qt_locale_data + locale_data_size)
             && (language == QLocale::AnyLanguage || data->m_language_id == uint(language))) {
         if ((script == QLocale::AnyScript || data->m_script_id == uint(script))
             && (country == QLocale::AnyCountry || data->m_country_id == uint(country))) {
@@ -2110,7 +2110,7 @@ QList<QLocale::Country> QLocale::countriesForLanguage(Language language)
     }
 
     unsigned language_id = language;
-    const QLocaleData *data = locale_data + locale_index[language_id];
+    const QLocaleData *data = qt_locale_data + locale_index[language_id];
     while (data->m_language_id == language_id) {
         const QLocale::Country country = static_cast<Country>(data->m_country_id);
         if (!result.contains(country))

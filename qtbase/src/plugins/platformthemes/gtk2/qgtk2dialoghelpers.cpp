@@ -473,7 +473,7 @@ void QGtk2FileDialogHelper::setNameFilters(const QStringList &filters)
 
     foreach (const QString &filter, filters) {
         GtkFileFilter *gtkFilter = gtk_file_filter_new();
-        const QString name = filter.left(filter.indexOf(QLatin1Char('(')));
+	const QString name = filter.left(filter.lastIndexOf(QLatin1Char('(')));
         const QStringList extensions = cleanFilterList(filter);
 
         gtk_file_filter_set_name(gtkFilter, name.isEmpty() ? extensions.join(QStringLiteral(", ")).toUtf8() : name.toUtf8());

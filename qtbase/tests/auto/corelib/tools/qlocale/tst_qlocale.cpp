@@ -1689,7 +1689,7 @@ void tst_QLocale::negativeNumbers()
 #include <private/qlocale_p.h>
 #include <private/qlocale_data_p.h>
 
-static const int locale_data_count = sizeof(locale_data)/sizeof(locale_data[0]);
+static const int locale_data_count = sizeof(qt_locale_data)/sizeof(qt_locale_data[0]);
 
 void tst_QLocale::testNames_data()
 {
@@ -1697,7 +1697,7 @@ void tst_QLocale::testNames_data()
     QTest::addColumn<int>("country");
 
     for (int i = 0; i < locale_data_count; ++i) {
-        const QLocaleData &item = locale_data[i];
+        const QLocaleData &item = qt_locale_data[i];
 
         const QString testName = QString::fromLatin1("data_%1 (%2/%3)").arg(i)
                 .arg(QLocale::languageToString((QLocale::Language)item.m_language_id))

@@ -621,6 +621,7 @@ void QCocoaWindow::show(bool becauseOfAncestor)
     }
 }
 
+QPointF kludge;
 void QCocoaWindow::setVisible(bool visible)
 {
     if (m_isNSWindowChild && m_hiddenByClipping)
@@ -703,8 +704,8 @@ void QCocoaWindow::setVisible(bool visible)
                     if (!(parentCocoaWindow && window()->transientParent()->isActive()) && window()->type() == Qt::Popup) {
                         removeMonitor();
                         monitor = [NSEvent addGlobalMonitorForEventsMatchingMask:NSLeftMouseDownMask|NSRightMouseDownMask|NSOtherMouseDownMask|NSMouseMovedMask handler:^(NSEvent *e) {
-                            QPointF localPoint = qt_mac_flipPoint([NSEvent mouseLocation]);
-                            QWindowSystemInterface::handleMouseEvent(window(), window()->mapFromGlobal(localPoint.toPoint()), localPoint,
+                            kludge = qt_mac_flipPoint([NSEvent mouseLocation]);
+                            QWindowSystemInterface::handleMouseEvent(window(), window()->mapFromGlobal(kludge.toPoint()), kludge,
                                                                      cocoaButton2QtButton([e buttonNumber]));
                         }];
                     }

@@ -264,7 +264,7 @@ QXcbClipboard::QXcbClipboard(QXcbConnection *c)
     , m_requestor(XCB_NONE)
     , m_owner(XCB_NONE)
     , m_incr_active(false)
-    , m_clipboard_closing(false)
+    , m_clipboard_closing(0)
     , m_incr_receive_time(0)
 {
     Q_ASSERT(QClipboard::Clipboard == 0);
@@ -300,10 +300,11 @@ QXcbClipboard::QXcbClipboard(QXcbConnection *c)
 
 QXcbClipboard::~QXcbClipboard()
 {
-    m_clipboard_closing = true;
+    m_clipboard_closing |= CLIPBOARD_CLOSING;
     // Transfer the clipboard content to the clipboard manager if we own a selection
-    if (m_timestamp[QClipboard::Clipboard] != XCB_CURRENT_TIME ||
-            m_timestamp[QClipboard::Selection] != XCB_CURRENT_TIME) {
+    if ((m_clipboard_closing & CLIPBOARD_ATEXIT) == 0
+	&& (m_timestamp[QClipboard::Clipboard] != XCB_CURRENT_TIME ||
+	    m_timestamp[QClipboard::Selection] != XCB_CURRENT_TIME)) {
 
         // First we check if there is a clipboard manager.
         xcb_get_selection_owner_cookie_t cookie = xcb_get_selection_owner(xcb_connection(), atom(QXcbAtom::CLIPBOARD_MANAGER));
@@ -540,7 +541,7 @@ xcb_atom_t QXcbClipboard::sendSelection(QMimeData *d, xcb_atom_t target, xcb_win
         static xcb_atom_t motif_clip_temporary = atom(QXcbAtom::CLIP_TEMPORARY);
         bool allow_incr = property != motif_clip_temporary;
         // This 'bool' can be removed once there is a proper fix for QTBUG-32853
-        if (m_clipboard_closing)
+        if (m_clipboard_closing & CLIPBOARD_CLOSING)
             allow_incr = false;
         // X_ChangeProperty protocol request is 24 bytes
         const int increment = (xcb_get_maximum_request_length(xcb_connection()) * 4) - 24;

@@ -102,8 +102,13 @@ private:
     static const int clipboard_timeout;
 
     bool m_incr_active;
-    bool m_clipboard_closing;
+#define CLIPBOARD_CLOSING 1 << 0
+#define CLIPBOARD_ATEXIT  1 << 1
+    unsigned char m_clipboard_closing;
     xcb_timestamp_t m_incr_receive_time;
+
+public:
+    void atexit_encountered() { m_clipboard_closing |= CLIPBOARD_ATEXIT; }
 };
 
 #endif // QT_NO_CLIPBOARD

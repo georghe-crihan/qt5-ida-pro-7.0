@@ -199,7 +199,7 @@ protected:
 
     bool relayFocusToModalWindow() const;
     void doFocusIn();
-    void doFocusOut();
+    void doFocusOut(bool destroying);
 
     bool compressExposeEvent(QRegion &exposeRegion);
 
